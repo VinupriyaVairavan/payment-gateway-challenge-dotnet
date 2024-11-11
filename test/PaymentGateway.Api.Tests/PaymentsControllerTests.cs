@@ -1,61 +1,122 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using FluentAssertions;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
-
+using Moq;
 using PaymentGateway.Api.Controllers;
-using PaymentGateway.Api.Models.Responses;
+using PaymentGateway.Api.Models;
+using PaymentGateway.Api.Repositories;
 using PaymentGateway.Api.Services;
+using PaymentGateway.Models.Requests;
+using PaymentGateway.Models.Responses;
 
 namespace PaymentGateway.Api.Tests;
 
 public class PaymentsControllerTests
 {
-    private readonly Random _random = new();
-    
-    [Fact]
-    public async Task RetrievesAPaymentSuccessfully()
+    private readonly Mock<IPaymentService> mockPaymentService;
+    private readonly PaymentsController controller;
+
+    public PaymentsControllerTests()
     {
-        // Arrange
-        var payment = new PostPaymentResponse
-        {
-            Id = Guid.NewGuid(),
-            ExpiryYear = _random.Next(2023, 2030),
-            ExpiryMonth = _random.Next(1, 12),
-            Amount = _random.Next(1, 10000),
-            CardNumberLastFour = _random.Next(1111, 9999),
-            Currency = "GBP"
-        };
-
-        var paymentsRepository = new PaymentsRepository();
-        paymentsRepository.Add(payment);
-
-        var webApplicationFactory = new WebApplicationFactory<PaymentsController>();
-        var client = webApplicationFactory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services => ((ServiceCollection)services)
-                .AddSingleton(paymentsRepository)))
-            .CreateClient();
-
-        // Act
-        var response = await client.GetAsync($"/api/Payments/{payment.Id}");
-        var paymentResponse = await response.Content.ReadFromJsonAsync<PostPaymentResponse>();
-        
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.NotNull(paymentResponse);
+        mockPaymentService = new Mock<IPaymentService>();
+        controller = new PaymentsController(mockPaymentService.Object);
     }
 
     [Fact]
-    public async Task Returns404IfPaymentNotFound()
+    public async Task PostPaymentAsync_ShouldReturnOkResult_WithPaymentResponse()
     {
         // Arrange
-        var webApplicationFactory = new WebApplicationFactory<PaymentsController>();
-        var client = webApplicationFactory.CreateClient();
-        
+        var paymentRequest = new PostPaymentRequest { Id = Guid.NewGuid() };
+        var expectedResponse = new PostPaymentResponse {Status = PaymentStatus.Authorized.ToString()};
+
+        mockPaymentService
+            .Setup(service => service.ProcessPaymentAsync(paymentRequest))
+            .ReturnsAsync(expectedResponse);
+
         // Act
-        var response = await client.GetAsync($"/api/Payments/{Guid.NewGuid()}");
-        
+        var result = await controller.PostPaymentAsync(paymentRequest);
+
         // Assert
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        result.Result.Should().BeOfType<OkObjectResult>(); 
+        var okResult = result.Result as OkObjectResult;
+        okResult.Value.Should().Be(expectedResponse);
+    }
+    
+    [Fact]
+    public async Task GetPaymentAsync_ShouldReturnOkResult_WithPayment()
+    {
+        // Arrange
+        var paymentId = Guid.NewGuid();
+        var expectedPayment = new GetPaymentResponse ();
+
+        mockPaymentService
+            .Setup(service => service.GetPaymentAsync(paymentId))
+            .ReturnsAsync(expectedPayment);
+
+        // Act
+        var result = await controller.GetPaymentAsync(paymentId);
+
+        // Assert
+        result.Result.Should().BeOfType<OkObjectResult>();  
+        var okResult = result.Result as OkObjectResult;
+        okResult.Value.Should().Be(expectedPayment); 
+    }
+    
+    [Fact]
+    public async Task GetPaymentAsync_ShouldReturnNotFoundResult_WhenPaymentIdDoesNotExist()
+    {
+        // Arrange
+        var paymentId = Guid.NewGuid();
+        var expectedPayment = new GetPaymentResponse();
+
+        mockPaymentService
+            .Setup(service => service.GetPaymentAsync(paymentId))
+            .ReturnsAsync((GetPaymentResponse?)null);
+
+        // Act
+        var result = await controller.GetPaymentAsync(paymentId);
+
+        // Assert
+        result.Result.Should().BeOfType<NotFoundObjectResult>(); 
+    }
+
+    [Fact]
+    public async Task PostPaymentAsync_ShouldReturnBadRequestResult_WhenPaymentIsRejectedOrDeclined()
+    {
+        // Arrange
+        var paymentRequest = new PostPaymentRequest { Id = Guid.NewGuid() };
+        var expectedResponse = new PostPaymentResponse {Status = PaymentStatus.Rejected.ToString()};
+
+        mockPaymentService
+            .Setup(service => service.ProcessPaymentAsync(paymentRequest))
+            .ReturnsAsync(expectedResponse);
+
+        // Act
+        var result = await controller.PostPaymentAsync(paymentRequest);
+
+        // Assert
+        result.Result.Should().BeOfType<BadRequestObjectResult>(); 
+        var badResult = result.Result as BadRequestObjectResult;
+        badResult.Value.Should().Be(expectedResponse);
+    }
+    
+    [Fact]
+    public async Task PostPaymentAsync_ShouldReturnNotFoundRequestResult_WhenPaymentIdNotRecognized()
+    {
+        // Arrange
+        var paymentRequest = new PostPaymentRequest { Id = Guid.NewGuid() };
+
+        mockPaymentService
+            .Setup(service => service.ProcessPaymentAsync(paymentRequest))
+            .ReturnsAsync((PostPaymentResponse?)null);
+
+        // Act
+        var result = await controller.PostPaymentAsync(paymentRequest);
+
+        // Assert
+        result.Result.Should().BeOfType<NotFoundObjectResult>();
     }
 }
