@@ -26,51 +26,43 @@ public class PaymentService(
         var paymentResponse = mapper.Map<PostPaymentResponse>(paymentRequest);
         var paymentProviderRequest = mapper.Map<PostPaymentProviderRequest>(paymentRequest);
         
-        try
+        // Validate incoming request
+        if (!ValidatePaymentRequest(paymentRequest, paymentResponse))
+            return paymentResponse;
+
+        if (paymentRequest.Id != Guid.Empty) //Idempotent request processing
         {
-            // Validate incoming request
-            if (!ValidatePaymentRequest(paymentRequest, paymentResponse))
-                return paymentResponse;
+            var getResponse = await GetPaymentAsync(paymentRequest.Id);
 
-            if (paymentRequest.Id != Guid.Empty) //Idempotent request processing
-            {
-                var getResponse = await GetPaymentAsync(paymentRequest.Id);
-
-                if(getResponse == null || getResponse.Status == PaymentStatus.Authorized.ToString())
-                    return mapper.Map<PostPaymentResponse>(getResponse);
-            }
-            else
-            {
-                // Generate a payment id for the request
-                paymentProviderRequest.Id = paymentIdProvider.Generate(paymentRequest);
-            }
-
-            //Invoke Payment processor
-            var client = httpClientFactory.CreateClient(Constants.MY_API_CLIENT);
-            var response =
-                await client.PostAsJsonAsync(Constants.PAYMENTS_ENDPOINT, paymentProviderRequest);
-
-            var content = await response.Content.ReadFromJsonAsync<PostPaymentProviderResponse>();
-
-            paymentResponse.Id = paymentProviderRequest.Id;
-            paymentResponse.Status = content?.Authorized == true 
-                ? PaymentStatus.Authorized.ToString()
-                : PaymentStatus.Declined.ToString();
-            
-            paymentResponse.AuthorizationCode = content?.Authorized == true 
-                ? content.AuthorizationCode 
-                : null;
-            
-            //Store the payment request with generated payment id
-            var payment = mapper.Map<Payment>(paymentResponse);
-            payment.Id = paymentProviderRequest.Id;
-            await paymentRepository.AddAsync(payment);
+            if (getResponse == null || getResponse.Status == PaymentStatus.Authorized.ToString())
+                return mapper.Map<PostPaymentResponse>(getResponse);
         }
-        catch (Exception ex)
+        else
         {
-            logger.LogError(ex.Message, ex, paymentRequest);
+            // Generate a payment id for the request
+            paymentProviderRequest.Id = paymentIdProvider.Generate(paymentRequest);
         }
 
+        //Invoke Payment processor
+        var client = httpClientFactory.CreateClient(Constants.MY_API_CLIENT);
+        var response =
+            await client.PostAsJsonAsync(Constants.PAYMENTS_ENDPOINT, paymentProviderRequest);
+
+        var content = await response.Content.ReadFromJsonAsync<PostPaymentProviderResponse>();
+
+        paymentResponse.Id = paymentProviderRequest.Id;
+        paymentResponse.Status = content?.Authorized == true
+            ? PaymentStatus.Authorized.ToString()
+            : PaymentStatus.Declined.ToString();
+
+        paymentResponse.AuthorizationCode = content?.Authorized == true
+            ? content.AuthorizationCode
+            : null;
+
+        //Store the payment request with generated payment id
+        var payment = mapper.Map<Payment>(paymentResponse);
+        payment.Id = paymentProviderRequest.Id;
+        await paymentRepository.AddAsync(payment);
         return paymentResponse;
     }
 

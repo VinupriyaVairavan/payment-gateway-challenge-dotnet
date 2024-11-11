@@ -32,6 +32,7 @@
 
   <ItemGroup>
     <Compile Remove="AutomapperProfiles\ExpiryDateResolver.cs" />
+    <Compile Remove="Controllers\ErrorController.cs" />
   </ItemGroup>
 
   <ItemGroup>

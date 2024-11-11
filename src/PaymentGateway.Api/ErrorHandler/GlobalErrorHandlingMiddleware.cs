@@ -29,11 +29,11 @@ public class GlobalErrorHandlingMiddleware(
             //     { "SpanId", activity?.SpanId.ToString() ?? "N/A" }
             // });
 
-            await HandleExceptionAsync(context, ex);
+            await HandleExceptionAsync(context, ex, logger);
         }
     }
 
-    private static Task HandleExceptionAsync(HttpContext context, Exception exception)
+    private static Task HandleExceptionAsync(HttpContext context, Exception exception, ILoggerService<GlobalErrorHandlingMiddleware> logger)
     {
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
@@ -46,7 +46,7 @@ public class GlobalErrorHandlingMiddleware(
         };
 
         var jsonResponse = JsonSerializer.Serialize(response);
-
-        return context.Response.WriteAsync(jsonResponse);
+        logger.LogError(JsonSerializer.Serialize(exception));
+        return context.Response.WriteAsync("Something went wrong");
     }
 }
